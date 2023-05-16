@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,12 +12,12 @@ import (
 
 	"github.com/google/uuid"
 	flags "github.com/jessevdk/go-flags"
-	colorable "github.com/mattn/go-colorable"
-	"github.com/mitchellh/colorstring"
 	"github.com/pkg/profile"
 
-	"github.com/gotzmann/llama.go/pkg/llama"
-	"github.com/gotzmann/llama.go/pkg/server"
+	"github.com/extrame/llama.go/pkg/grpc"
+	"github.com/extrame/llama.go/pkg/llama"
+	"github.com/extrame/llama.go/pkg/server"
+	"github.com/extrame/llama.go/pkg/utils"
 )
 
 const VERSION = "1.4.0"
@@ -25,6 +26,7 @@ type Options struct {
 	Prompt  string  `long:"prompt" description:"Text prompt from user to feed the model input"`
 	Model   string  `long:"model" description:"Path and file name of converted .bin LLaMA model [ llama-7b-fp32.bin, etc ]"`
 	Server  bool    `long:"server" description:"Start in Server Mode acting as REST API endpoint"`
+	Grpc    bool    `long:"grpc" description:"Start in Grpc Server Mode acting as Grpc API endpoint"`
 	Host    string  `long:"host" description:"Host to allow requests from in Server Mode [ localhost by default ]"`
 	Port    string  `long:"port" description:"Port listen to in Server Mode [ 8080 by default ]"`
 	Pods    int64   `long:"pods" description:"Maximum pods or units of parallel execution allowed in Server Mode [ 1 by default ]"`
@@ -55,12 +57,12 @@ func main() {
 	// --- special command to load model file
 
 	if len(os.Args) > 1 && os.Args[1] == "load" {
-		Colorize("[magenta][ LOAD ][light_blue] Downloading model [light_magenta]%s[light_blue] into [light_magenta]%s[light_blue]", opts.Model, opts.Dir)
+		utils.Colorize("[magenta][ LOAD ][light_blue] Downloading model [light_magenta]%s[light_blue] into [light_magenta]%s[light_blue]", opts.Model, opts.Dir)
 		size, err := downloadModel(opts.Dir, opts.Model)
 		if err != nil {
-			Colorize("\n[magenta][ ERROR ][light_blue] Model [light_magenta]%s[light_blue] was not downloaded: [light_red]%s!\n\n", opts.Model, err.Error())
+			utils.Colorize("\n[magenta][ ERROR ][light_blue] Model [light_magenta]%s[light_blue] was not downloaded: [light_red]%s!\n\n", opts.Model, err.Error())
 		} else {
-			Colorize("\n[magenta][ LOAD ][light_blue] Model [light_magenta]%s[light_blue] of size [light_magenta]%d Gb[light_blue] was successfully downloaded!\n\n", opts.Model, size/1024/1024/1024)
+			utils.Colorize("\n[magenta][ LOAD ][light_blue] Model [light_magenta]%s[light_blue] of size [light_magenta]%d Gb[light_blue] was successfully downloaded!\n\n", opts.Model, size/1024/1024/1024)
 		}
 		os.Exit(0)
 	}
@@ -96,7 +98,7 @@ func main() {
 
 	vocab, model, err := llama.LoadModel(params.Model, params, opts.Silent)
 	if err != nil {
-		Colorize("\n[magenta][ ERROR ][white] Failed to load model [light_magenta]\"%s\"\n\n", params.Model)
+		utils.Colorize("\n[magenta][ ERROR ][white] Failed to load model [light_magenta]\"%s\"\n\n", params.Model)
 		os.Exit(0)
 	}
 
@@ -109,43 +111,52 @@ func main() {
 	server.Model = model
 	server.Params = params
 
-	go server.Run()
-
-	if !opts.Silent && opts.Server {
-		Colorize("\n[light_magenta][ INIT ][light_blue] REST server ready on [light_magenta]%s:%s", opts.Host, opts.Port)
-	}
-
-	// --- wait for API calls as REST server, or compute just the one prompt from user CLI
-
-	// TODO: Control signals between main() and server
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	if opts.Server {
-		wg.Wait()
-	} else {
-
-		// add a space to match LLaMA tokenizer behavior
-		prompt := " " + opts.Prompt
-		jobID := uuid.New().String()
-		server.PlaceJob(jobID, prompt)
-		output := ""
-
-		//Colorize("\n\n[magenta]▒▒▒[light_yellow]" + prompt + "\n[light_blue]▒▒▒ ")
-		Colorize("\n\n[magenta][ PROMPT ][light_magenta]" + prompt + "\n[light_blue][ OUTPUT ][white]")
-
-		for {
-			time.Sleep(100 * time.Millisecond)
-			if output != server.Jobs[jobID].Output {
-				diff := server.Jobs[jobID].Output[len(output):]
-				fmt.Printf(diff)
-				output += diff
-			}
-			if server.Jobs[jobID].Status == "finished" {
-				break
-			}
+	if opts.Grpc {
+		runningCtx, _ := context.WithCancel(context.Background())
+		_, err := grpc.NewServer(opts.Host+":"+opts.Port, opts.Pods, vocab, model, params, runningCtx)
+		if err != nil {
+			panic(err)
 		}
-		os.Exit(0)
+		<-runningCtx.Done()
+	} else {
+		go server.Run()
+
+		if !opts.Silent && opts.Server {
+			utils.Colorize("\n[light_magenta][ INIT ][light_blue] REST server ready on [light_magenta]%s:%s", opts.Host, opts.Port)
+		}
+
+		// --- wait for API calls as REST server, or compute just the one prompt from user CLI
+
+		// TODO: Control signals between main() and server
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		if opts.Server {
+			wg.Wait()
+		} else {
+
+			// add a space to match LLaMA tokenizer behavior
+			prompt := " " + opts.Prompt
+			jobID := uuid.New().String()
+			server.PlaceJob(jobID, prompt)
+			output := ""
+
+			//utils.Colorize("\n\n[magenta]▒▒▒[light_yellow]" + prompt + "\n[light_blue]▒▒▒ ")
+			utils.Colorize("\n\n[magenta][ PROMPT ][light_magenta]" + prompt + "\n[light_blue][ OUTPUT ][white]")
+
+			for {
+				time.Sleep(100 * time.Millisecond)
+				if output != server.Jobs[jobID].Output {
+					diff := server.Jobs[jobID].Output[len(output):]
+					fmt.Printf(diff)
+					output += diff
+				}
+				if server.Jobs[jobID].Status == "finished" {
+					break
+				}
+			}
+			os.Exit(0)
+		}
 	}
 
 	/*
@@ -288,11 +299,11 @@ func main() {
 						}
 
 						if len(strings.TrimSpace(final)) == len(strings.TrimSpace(prompt)) && (token != "\n") && (len(out) == 2) {
-							Colorize("\n\n[magenta]▒▒▒ [light_yellow]" + strings.TrimSpace(prompt) + "\n[light_blue]▒▒▒ ")
+							utils.Colorize("\n\n[magenta]▒▒▒ [light_yellow]" + strings.TrimSpace(prompt) + "\n[light_blue]▒▒▒ ")
 							continue
 						}
 
-						Colorize("[white]" + token)
+						utils.Colorize("[white]" + token)
 
 						tokenCounter++
 						fullPerformance = append(fullPerformance, time.Now().UnixNano()-start)
@@ -305,14 +316,14 @@ func main() {
 			}
 
 			if ml.DEBUG {
-				//Colorize("\n\n=== TOKEN EVAL TIMINGS ===\n\n")
+				//utils.Colorize("\n\n=== TOKEN EVAL TIMINGS ===\n\n")
 				//for _, time := range evalPerformance {
-				//	Colorize("%d | ", time/1_000_000)
+				//	utils.Colorize("%d | ", time/1_000_000)
 				//}
 
-				Colorize("\n\n=== FULL TIMINGS ===\n\n")
+				utils.Colorize("\n\n=== FULL TIMINGS ===\n\n")
 				for _, time := range fullPerformance {
-					Colorize("%d | ", time/1_000_000)
+					utils.Colorize("%d | ", time/1_000_000)
 				}
 			}
 
@@ -322,7 +333,7 @@ func main() {
 			}
 			avgEval /= int64(len(fullPerformance))
 
-			Colorize(
+			utils.Colorize(
 				"\n\n[light_magenta][ HALT ][white] Time per token: [light_cyan]%d[white] ms | Tokens per second: [light_cyan]%.2f\n\n",
 				avgEval,
 				float64(1000)/float64(avgEval))
@@ -335,17 +346,17 @@ func parseOptions() *Options {
 
 	_, err := flags.Parse(&opts)
 	if err != nil {
-		Colorize("\n[magenta][ ERROR ][white] Can't parse options from command line!\n\n")
+		utils.Colorize("\n[magenta][ ERROR ][white] Can't parse options from command line!\n\n")
 		os.Exit(0)
 	}
 
 	if opts.Model == "" {
-		Colorize("\n[magenta][ ERROR ][white] Please specify correct model path with [light_magenta]--model[white] parameter!\n\n")
+		utils.Colorize("\n[magenta][ ERROR ][white] Please specify correct model path with [light_magenta]--model[white] parameter!\n\n")
 		os.Exit(0)
 	}
 
 	if opts.Server == false && opts.Prompt == "" && len(os.Args) > 1 && os.Args[1] != "load" {
-		Colorize("\n[magenta][ ERROR ][white] Please specify correct prompt with [light_magenta]--prompt[white] parameter!\n\n")
+		utils.Colorize("\n[magenta][ ERROR ][white] Please specify correct prompt with [light_magenta]--prompt[white] parameter!\n\n")
 		os.Exit(0)
 	}
 
@@ -383,14 +394,6 @@ func parseOptions() *Options {
 	return &opts
 }
 
-// Colorize is a wrapper for colorstring.Color() and fmt.Fprintf()
-// Join colorstring and go-colorable to allow colors both on Mac and Windows
-// TODO: Implement as a small library
-func Colorize(format string, opts ...interface{}) (n int, err error) {
-	var DefaultOutput = colorable.NewColorableStdout()
-	return fmt.Fprintf(DefaultOutput, colorstring.Color(format), opts...)
-}
-
 func showLogo() {
 
 	// https://patorjk.com/software/taag/#p=display&f=3-D&t=llama.go%0A%0ALLaMA.go
@@ -425,8 +428,8 @@ func showLogo() {
 		}
 	}
 
-	Colorize(logoColored)
-	Colorize(
+	utils.Colorize(logoColored)
+	utils.Colorize(
 		"\n\n   [magenta]▒▒▒▒[light_magenta] [ LLaMA.go v" +
 			VERSION +
 			" ] [light_blue][ LLaMA GPT in pure Golang - based on LLaMA C++ ] [magenta]▒▒▒▒\n\n")

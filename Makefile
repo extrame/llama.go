@@ -111,10 +111,10 @@ test_gotest_cover:
 testbadge:
 	@echo "Running tests to update readme with badge coverage"
 	@go tool cover -func=coverage.out -o=coverage.out
-	@gobadge -filename=coverage.out -link https://github.com/gotzmann/llama.go/actions/workflows/coverage.yml
+	@gobadge -filename=coverage.out -link https://github.com/extrame/llama.go/actions/workflows/coverage.yml
 
 doc:
-	@echo "doc: http://localhost:8080/pkg/github.com/gotzmann/llama.go"
+	@echo "doc: http://localhost:8080/pkg/github.com/extrame/llama.go"
 	godoc -http=:8080 -index
 
 release:

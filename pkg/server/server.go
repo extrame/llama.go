@@ -11,11 +11,10 @@ import (
 
 	fiber "github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	colorable "github.com/mattn/go-colorable"
-	"github.com/mitchellh/colorstring"
 
-	"github.com/gotzmann/llama.go/pkg/llama"
-	"github.com/gotzmann/llama.go/pkg/ml"
+	"github.com/extrame/llama.go/pkg/llama"
+	"github.com/extrame/llama.go/pkg/ml"
+	"github.com/extrame/llama.go/pkg/utils"
 )
 
 // TODO: Helicopter View - how to work with balancers and multi-pod architectures?
@@ -246,19 +245,19 @@ func Do(jobID string) {
 	mu.Unlock()
 
 	//if ml.DEBUG {
-	Colorize("\n\n=== EVAL TIME | ms ===\n\n")
+	utils.Colorize("\n\n=== EVAL TIME | ms ===\n\n")
 	for _, time := range evalPerformance {
-		Colorize("%d | ", time/1_000_000)
+		utils.Colorize("%d | ", time/1_000_000)
 	}
 
-	Colorize("\n\n=== SAMPLING TIME | ms ===\n\n")
+	utils.Colorize("\n\n=== SAMPLING TIME | ms ===\n\n")
 	for _, time := range samplePerformance {
-		Colorize("%d | ", time/1_000_000)
+		utils.Colorize("%d | ", time/1_000_000)
 	}
 
-	Colorize("\n\n=== FULL TIME | ms ===\n\n")
+	utils.Colorize("\n\n=== FULL TIME | ms ===\n\n")
 	for _, time := range fullPerformance {
-		Colorize("%d | ", time/1_000_000)
+		utils.Colorize("%d | ", time/1_000_000)
 	}
 
 	avgEval := int64(0)
@@ -267,7 +266,7 @@ func Do(jobID string) {
 	}
 	avgEval /= int64(len(fullPerformance))
 
-	Colorize(
+	utils.Colorize(
 		"\n\n[light_magenta][ HALT ][white] Time per token: [light_cyan]%d[white] ms | Tokens per second: [light_cyan]%.2f\n\n",
 		avgEval,
 		float64(1000)/float64(avgEval))
@@ -404,12 +403,4 @@ func GetJob(ctx *fiber.Ctx) error {
 		"model":    "model-xx", // TODO: Real model ID
 		"status":   Jobs[id].Status,
 	})
-}
-
-// Colorize is a wrapper for colorstring.Color() and fmt.Fprintf()
-// Join colorstring and go-colorable to allow colors both on Mac and Windows
-// TODO: Implement as a small library
-func Colorize(format string, opts ...interface{}) (n int, err error) {
-	var DefaultOutput = colorable.NewColorableStdout()
-	return fmt.Fprintf(DefaultOutput, colorstring.Color(format), opts...)
 }

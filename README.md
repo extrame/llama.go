@@ -168,7 +168,7 @@ brew install golang
 Then clone the repo and enter the project folder:
 
 ```
-git clone https://github.com/gotzmann/llama.go.git
+git clone https://github.com/extrame/llama.go.git
 cd llama.go
 ```
 
